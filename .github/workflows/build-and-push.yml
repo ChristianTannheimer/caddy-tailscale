@@ -2,11 +2,11 @@ name: Build and Push Caddy with Tailscale
 
 on:
   schedule:
-    - cron: '0 3 * * 0' # Baut automatisch jeden Sonntag um 03:00 Uhr UTC
-  workflow_dispatch:    # Erlaubt dir, den Build jederzeit manuell per Button zu starten
+    - cron: '0 0 * * *' # Läuft jetzt jeden Tag um 03:00 Uhr, baut aber nur bei Änderungen!
+  workflow_dispatch:
   push:
     branches:
-      - main            # Baut neu, falls du das Dockerfile mal änderst
+      - main
 
 env:
   REGISTRY: ghcr.io
@@ -23,16 +23,38 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }} # Das Token generiert GitHub automatisch!
+      - name: Check for updates
+        id: check
+        run: |
+          # 1. Hole die neueste Version von Caddy
+          CADDY_LATEST=$(curl -sL "https://api.github.com/repos/caddyserver/caddy/releases/latest" | jq -r .tag_name)
+          
+          # 2. Hole den neuesten Code-Stand (Commit) des Tailscale-Plugins
+          TS_LATEST=$(curl -sL "https://api.github.com/repos/tailscale/caddy-tailscale/commits/main" | jq -r .sha | cut -c1-7)
+          
+          # 3. Bastle daraus einen eindeutigen Tag, z.B. "v2.8.4-ts-a1b2c3d"
+          VERSION_TAG="${CADDY_LATEST}-ts-${TS_LATEST}"
+          echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
+          echo "Prüfe Version: ${VERSION_TAG}"
+          
+          # 4. Login bei GitHub Container Registry um nachzusehen
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          # 5. Prüfe, ob genau dieses Image schon existiert
+          if docker manifest inspect ghcr.io/${{ env.IMAGE_NAME }}:${VERSION_TAG} > /dev/null 2>&1; then
+            echo "Keine Änderungen. Image existiert bereits. Breche ab."
+            echo "build_needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Neue Version gefunden! Starte den Build-Prozess..."
+            echo "build_needed=true" >> $GITHUB_OUTPUT
+          fi
 
       - name: Build and push Docker image
+        if: steps.check.outputs.build_needed == 'true'
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.check.outputs.version_tag }}
