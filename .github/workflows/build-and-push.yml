@@ -1,8 +1,8 @@
-name: Build and Push Caddy with Tailscale
+name: Build and Push Caddy with Tailscale and MaxMind
 
 on:
   schedule:
-    - cron: '0 0 * * *' # Läuft jetzt jeden Tag um 03:00 Uhr, baut aber nur bei Änderungen!
+    - cron: '0 0 * * *' # Läuft jetzt jeden Tag um 00:00 Uhr UTC, baut aber nur bei Änderungen!
   workflow_dispatch:
   push:
     branches:
@@ -32,15 +32,19 @@ jobs:
           # 2. Hole den neuesten Code-Stand (Commit) des Tailscale-Plugins
           TS_LATEST=$(curl -sL "https://api.github.com/repos/tailscale/caddy-tailscale/commits/main" | jq -r .sha | cut -c1-7)
           
-          # 3. Bastle daraus einen eindeutigen Tag, z.B. "v2.8.4-ts-a1b2c3d"
-          VERSION_TAG="${CADDY_LATEST}-ts-${TS_LATEST}"
+          # 3. Hole den neuesten Code-Stand (Commit) des MaxMind-Plugins
+          # Hier fragen wir direkt die Commits ab, da der Standard-Branch variieren kann
+          MM_LATEST=$(curl -sL "https://api.github.com/repos/porech/caddy-maxmind-geolocation/commits" | jq -r '.[0].sha' | cut -c1-7)
+          
+          # 4. Bastle daraus einen eindeutigen Tag, z.B. "v2.8.4-ts-a1b2c3d-mm-e5f6g7h"
+          VERSION_TAG="${CADDY_LATEST}-ts-${TS_LATEST}-mm-${MM_LATEST}"
           echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
           echo "Prüfe Version: ${VERSION_TAG}"
           
-          # 4. Login bei GitHub Container Registry um nachzusehen
+          # 5. Login bei GitHub Container Registry um nachzusehen
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
-          # 5. Prüfe, ob genau dieses Image schon existiert
+          # 6. Prüfe, ob genau dieses Image schon existiert
           if docker manifest inspect ghcr.io/${{ env.IMAGE_NAME }}:${VERSION_TAG} > /dev/null 2>&1; then
             echo "Keine Änderungen. Image existiert bereits. Breche ab."
             echo "build_needed=false" >> $GITHUB_OUTPUT
