@@ -2,6 +2,7 @@ FROM caddy:builder AS builder
 
 RUN xcaddy build \
     --with github.com/tailscale/caddy-tailscale
+    --with github.com/porech/caddy-maxmind-geolocation
 
 FROM caddy:latest
 
